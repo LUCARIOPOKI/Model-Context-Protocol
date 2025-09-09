@@ -16,7 +16,7 @@ from semantic_kernel.connectors.ai.open_ai import AzureChatCompletion
 # ----------------------------- setup -----------------------------
 load_dotenv()  # must be called before os.getenv
 
-GDEX_MCP_SERVER_URL = os.getenv("GDEX_MCP_SERVER_URL", "http://127.0.0.1:8000/mcp")
+MCP_SERVER_URL = os.getenv("custom_mcp_tools", "http://127.0.0.1:8000/mcp") # complete this line
 
 logging.basicConfig(
     format="[%(asctime)s - %(name)s:%(lineno)d - %(levelname)s] %(message)s",
@@ -26,7 +26,6 @@ logging.getLogger("kernel").setLevel(logging.DEBUG)
 logger = logging.getLogger(__name__)
 
 # ----------------------------- kernel & services -----------------------------
-conversation_id = "convo-914"
 kernel = Kernel()
 
 azure_service = AzureChatCompletion(
@@ -41,40 +40,31 @@ sk_history = ChatHistory()
 agent = ChatCompletionAgent(
     kernel=kernel,
     name="IntelligentAssistant",
-    instructions="Be a helpful assistant that helps the user with their queries.",
+    instructions="""
+    - Your name is Donna. You are a helpful assistant that helps people find information and answer questions.
+        You have access to the following tools:
+            - 1. get_date_time: Get the current date and time.
+                - this has no input parameters.
+            - 2. weather_info: Get the current weather information for a given location.
+                - input parameter: location (string): The location to get the weather information for.
+            - 3. get_book: Get book information based on a user query.
+                - input parameter: book_name (string): The query to search for books.
+
+        
+    """
     )
-
-# ----------------------------- helpers -----------------------------
-def _to_author_role(role_str: str) -> AuthorRole:
-    r = (role_str or "").lower()
-    if r == "user":
-        return AuthorRole.USER
-    if r in ("assistant", "assistant_model", "bot"):
-        return AuthorRole.ASSISTANT
-    if r == "system":
-        return AuthorRole.SYSTEM
-    if r in ("tool", "function"):
-        return AuthorRole.TOOL
-    return AuthorRole.USER
-
-def _coerce_content_to_str(content) -> str:
-    if isinstance(content, (dict, list)):
-        return json.dumps(content, ensure_ascii=False)
-    return str(content) if content is not None else ""
-
 # ----------------------------- main loop -----------------------------
 async def main():
-    contact_id = os.getenv("CONTACT_ID")
 
     async with MCPStreamableHttpPlugin(
-        name="gdexmcpserver",
-        description="MCP plugin for GDex using streaming",
-        url=GDEX_MCP_SERVER_URL,
+        name="mcpserver",
+        description="MCP plugin with custom tools with streaming",
+        url=MCP_SERVER_URL,
         load_prompts=False,
         request_timeout=30,
-    ) as gdex_plugin:
-        kernel.add_plugin(gdex_plugin)
-        logger.info(f"MCP plugin connected successfully to {GDEX_MCP_SERVER_URL}")
+    ) as mcp_plugin:
+        kernel.add_plugin(mcp_plugin)
+        logger.info(f"MCP plugin connected successfully to {MCP_SERVER_URL}")
 
         while True:
             query = input("User: ")
@@ -86,17 +76,15 @@ async def main():
             start = time.time()
 
             try:
-                # run assistant and capture output
                 response = await agent.get_response(sk_history)
                 assistant_text = response.message.content if response else ""
                 print(f"Assistant: {assistant_text}")
-
+                sk_history.add_assistant_message(assistant_text)
             except Exception as e:
                 logger.exception("Error during agent completion: %s", e)
 
             end = time.time()
             print(f"Response Time: {end - start:.2f} seconds")
-            print("-" * 120)
 
 if __name__ == "__main__":
     try:
@@ -107,4 +95,6 @@ if __name__ == "__main__":
             nest_asyncio.apply()
             asyncio.get_event_loop().run_until_complete(main())
         else:
-            raise
+            raise e
+
+# python semantic_kernel_MCP_client.py
